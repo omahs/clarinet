@@ -14,7 +14,6 @@ use chainhook_types::{
     PoxBlockCommitmentData, PoxReward, StacksBaseChainOperation, TransactionIdentifier,
     TransferSTXData,
 };
-use clarity_repl::clarity::deps_common::bitcoin::blockdata::script::Script;
 use clarity_repl::clarity::util::hash::{hex_bytes, to_hex};
 use rocket::serde::json::Value as JsonValue;
 
@@ -37,25 +36,39 @@ pub struct RewardParticipant {
 pub fn standardize_bitcoin_block(
     indexer_config: &IndexerConfig,
     marshalled_block: JsonValue,
-) -> BitcoinBlockData {
-    let mut transactions = vec![];
-
+) -> Result<BitcoinBlockData, String> {
     let auth = Auth::UserPass(
         indexer_config.bitcoin_node_rpc_username.clone(),
         indexer_config.bitcoin_node_rpc_password.clone(),
     );
-
-    let rpc = Client::new(&indexer_config.bitcoin_node_rpc_url, auth).unwrap();
-
-    let partial_block: NewBitcoinBlock = serde_json::from_value(marshalled_block).unwrap();
+    let rpc = Client::new(&indexer_config.bitcoin_node_rpc_url, auth).map_err(|e| {
+        format!(
+            "unable for bitcoin rpc initialize client: {}",
+            e.to_string()
+        )
+    })?;
+    let partial_block: NewBitcoinBlock = serde_json::from_value(marshalled_block)
+        .map_err(|e| format!("unable for parse bitcoin block: {}", e.to_string()))?;
     let block_hash = {
         let block_hash_str = partial_block.burn_block_hash.strip_prefix("0x").unwrap();
         let mut block_hash_bytes = hex_bytes(&block_hash_str).unwrap();
         block_hash_bytes.reverse();
         BlockHash::from_slice(&block_hash_bytes).unwrap()
     };
-    let block = rpc.get_block(&block_hash).unwrap();
+    let block = rpc
+        .get_block(&block_hash)
+        .map_err(|e| format!("unable for invoke rpc get_block: {}", e.to_string()))?;
     let block_height = partial_block.burn_block_height;
+    Ok(build_block(block, block_height, indexer_config))
+}
+
+pub fn build_block(
+    block: Block,
+    block_height: u64,
+    indexer_config: &IndexerConfig,
+) -> BitcoinBlockData {
+    let mut transactions = vec![];
+
     let expected_magic_bytes = get_canonical_magic_bytes(&indexer_config.bitcoin_network);
     let pox_config = get_canonical_pox_config(&indexer_config.bitcoin_network);
 
@@ -69,8 +82,13 @@ pub fn standardize_bitcoin_block(
                     vout: input.previous_output.vout,
                 },
                 script_sig: to_hex(input.script_sig.as_bytes()),
-                sequence: input.sequence,
-                witness: input.witness,
+                sequence: input.sequence.0,
+                witness: input
+                    .witness
+                    .to_vec()
+                    .iter()
+                    .map(|w| format!("0x{}", to_hex(w)))
+                    .collect::<Vec<_>>(),
             })
         }
 

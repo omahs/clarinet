@@ -6,8 +6,6 @@ RUN apt update && apt install -y ca-certificates pkg-config libssl-dev
 
 RUN rustup update 1.59.0 && rustup default 1.59.0
 
-COPY ./components/chainhook-node /src/components/chainhook-node
-
 COPY ./components/chainhook-types-rs /src/components/chainhook-types-rs
 
 COPY ./components/chainhook-event-observer /src/components/chainhook-event-observer
@@ -20,13 +18,13 @@ COPY ./components/clarinet-utils /src/components/clarinet-utils
 
 COPY ./components/hiro-system-kit /src/components/hiro-system-kit
 
-WORKDIR /src/components/chainhook-node
+WORKDIR /src/components/chainhook-event-observer
 
 RUN mkdir /out
 
-RUN cargo build --features release --release
+RUN cargo build --release
 
-RUN cp target/release/chainhook-node /out
+RUN cp target/release/chainhook-event-observer /out
 
 FROM debian:bullseye-slim
 
@@ -36,4 +34,4 @@ COPY --from=build /out/ /bin/
 
 WORKDIR /workspace
 
-ENTRYPOINT ["chainhook-node"]
+ENTRYPOINT ["chainhook-event-observer"]
